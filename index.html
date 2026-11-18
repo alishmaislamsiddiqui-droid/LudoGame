@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>4-Player Ludo (C Engine)</title>
+    <title>Multiplayer Ludo</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -12,25 +12,39 @@
             display: flex; flex-direction: column; align-items: center;
             margin: 0; padding: 15px;
         }
-        h1 { margin: 5px 0 12px; font-size: 24px; }
-        .panel {
-            display: flex; align-items: center; gap: 15px;
-            background: #2f3640; padding: 10px 20px; border-radius: 12px;
-            margin-bottom: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        h1 { margin: 5px 0 10px; font-size: 24px; }
+        .panel, .lobby {
+            display: flex; align-items: center; flex-wrap: wrap; justify-content: center;
+            gap: 12px; background: #2f3640; padding: 10px 18px; border-radius: 12px;
+            margin-bottom: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            max-width: 620px; width: 100%;
         }
-        #status { font-size: 16px; font-weight: 600; min-width: 280px; }
+        input, select {
+            padding: 8px 10px; border-radius: 6px; border: none; font-size: 14px;
+            background: #f5f6fa; color: #1e272e; font-weight: 600;
+        }
+        #status { font-size: 15px; font-weight: 600; flex: 1; min-width: 220px; }
         .dice-box {
             width: 44px; height: 44px; background: #f5f6fa; color: #1e272e;
             font-size: 24px; font-weight: bold; display: flex; align-items: center;
             justify-content: center; border-radius: 8px;
         }
         button {
-            padding: 10px 18px; font-size: 15px; font-weight: bold;
+            padding: 8px 14px; font-size: 14px; font-weight: bold;
             border: none; border-radius: 8px; cursor: pointer; transition: 0.2s;
         }
-        #roll-btn { background: #00a8ff; color: white; }
-        #roll-btn:disabled { background: #57606f; cursor: not-allowed; opacity: 0.6; }
+        button:disabled { opacity: 0.45; cursor: not-allowed; }
+        #roll-btn { background: #00a8ff; color: white; padding: 10px 18px; font-size: 15px; }
         #reset-btn { background: #e84118; color: white; }
+        .seat-btn { color: #fff; border: 2px solid transparent; }
+        .seat-0 { background: #ff4757; }
+        .seat-1 { background: #2ed573; color: #1e272e; }
+        .seat-2 { background: #ffa502; color: #1e272e; }
+        .seat-3 { background: #1e90ff; }
+        .my-seat { border: 2px solid #ffffff; box-shadow: 0 0 10px rgba(255,255,255,0.7); }
+        .badge {
+            font-size: 12px; background: #57606f; padding: 4px 8px; border-radius: 6px;
+        }
         #board {
             display: grid; grid-template-columns: repeat(15, 36px); grid-template-rows: repeat(15, 36px);
             background: #2f3640; border: 5px solid #dcdde1; border-radius: 6px;
@@ -71,16 +85,39 @@
     </style>
 </head>
 <body>
-    <h1>🎲 4-Player Ludo (C Engine)</h1>
+    <h1>🎲 Multiplayer Ludo</h1>
+
+    <div class="lobby">
+        <input type="text" id="player-name" placeholder="Your Name" maxlength="14" style="width: 130px;">
+        <div id="seats-container" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+        <div id="host-controls" style="display:flex; gap:6px; align-items:center;">
+            <select id="player-count">
+                <option value="2">2 Players</option>
+                <option value="3">3 Players</option>
+                <option value="4">4 Players</option>
+            </select>
+            <button id="reset-btn" onclick="resetMatch()">New Match</button>
+        </div>
+    </div>
+
     <div class="panel">
         <div id="status">Loading game...</div>
         <div class="dice-box" id="dice">-</div>
-        <button id="roll-btn" onclick="sendAction('roll')">Roll Dice</button>
-        <button id="reset-btn" onclick="sendAction('reset')">Reset</button>
+        <button id="roll-btn" onclick="sendAction('roll')" disabled>Roll Dice</button>
     </div>
+
     <div id="board"></div>
 
     <script>
+        // Persistent device ID
+        let pid = localStorage.getItem('ludo_pid');
+        if (!pid) {
+            pid = 'p_' + Math.random().toString(36).substring(2, 12);
+            localStorage.setItem('ludo_pid', pid);
+        }
+        const savedName = localStorage.getItem('ludo_name');
+        if (savedName) document.getElementById('player-name').value = savedName;
+
         const boardEl = document.getElementById('board');
         const cells = [];
         const MAIN_PATH = [
@@ -104,6 +141,7 @@
         ];
         const OFFSETS = [0, 13, 26, 39];
         const SAFE_TILES = [0, 8, 13, 21, 26, 34, 39, 47];
+        const COLOR_NAMES = ['Red', 'Green', 'Yellow', 'Blue'];
 
         for (let r = 0; r < 15; r++) {
             cells[r] = [];
@@ -128,14 +166,14 @@
                 cells[r][c] = div;
             }
         }
-        const colorNames = ['red', 'green', 'yellow', 'blue'];
+        const cssColors = ['red', 'green', 'yellow', 'blue'];
         HOME_PATHS.forEach((path, p) => {
             for (let i = 0; i < 5; i++) {
                 const [r, c] = path[i];
-                cells[r][c].classList.add(colorNames[p]);
+                cells[r][c].classList.add(cssColors[p]);
             }
             const [sr, sc] = MAIN_PATH[OFFSETS[p]];
-            cells[sr][sc].classList.add(colorNames[p]);
+            cells[sr][sc].classList.add(cssColors[p]);
         });
         SAFE_TILES.forEach(idx => {
             const [r, c] = MAIN_PATH[idx];
@@ -151,32 +189,74 @@
             return HOME_PATHS[player][relPos - 51];
         }
 
-        async function sendAction(action) {
-            await fetch('/action/' + action);
+        async function sendAction(action, extraParams = '') {
+            await fetch(`/action/${action}?pid=${pid}${extraParams}`);
             updateBoard();
         }
 
+        function joinSeat(seatIdx) {
+            const nameInput = document.getElementById('player-name').value.trim() || 'Player';
+            localStorage.setItem('ludo_name', nameInput);
+            sendAction('join', `&seat=${seatIdx}&name=${encodeURIComponent(nameInput)}`);
+        }
+
+        function resetMatch() {
+            const count = document.getElementById('player-count').value;
+            sendAction('reset', `&players=${count}`);
+        }
+
         async function updateBoard() {
-            const res = await fetch('/state');
-            const text = await res.text();
-            const lines = text.trim().split('\n');
-            if (lines.length < 6) return;
+            const res = await fetch(`/state?pid=${pid}`);
+            const state = await res.json();
 
-            const [turn, dice, sixCount, winner] = lines[0].split(' ').map(Number);
+            const { turn, dice, winner, activeSeats, tokens, status, mySeat, isHost, hasHost, players } = state;
+
+            // Render seats lobby
+            const seatsContainer = document.getElementById('seats-container');
+            seatsContainer.innerHTML = '';
+            for (let s = 0; s < 4; s++) {
+                if (activeSeats[s] === 0) continue;
+                const btn = document.createElement('button');
+                btn.className = `seat-btn seat-${s}` + (mySeat === s ? ' my-seat' : '');
+                const occupantName = players[String(s)];
+                if (occupantName) {
+                    btn.innerText = `${COLOR_NAMES[s]}: ${occupantName}` + (mySeat === s ? ' (You)' : '');
+                    btn.disabled = true;
+                } else {
+                    btn.innerText = `Join ${COLOR_NAMES[s]}`;
+                    btn.onclick = () => joinSeat(s);
+                }
+                seatsContainer.appendChild(btn);
+            }
+
+            // Host controls visibility (only host or first visitor can reset/change player count)
+            const hostControls = document.getElementById('host-controls');
+            hostControls.style.display = (isHost || !hasHost) ? 'flex' : 'none';
+
+            // Update status & dice
             document.getElementById('dice').innerText = dice === 0 ? '-' : dice;
-            document.getElementById('status').innerText = lines[5];
-            document.getElementById('roll-btn').disabled = (dice !== 0 || winner !== -1);
+            const isMyTurn = (mySeat !== null && mySeat === turn);
+            let turnHint = '';
+            if (winner === -1) {
+                if (isMyTurn) turnHint = ' — YOUR TURN!';
+                else if (mySeat === null) turnHint = ' — Pick a color above to join!';
+            }
+            document.getElementById('status').innerText = status + turnHint;
 
+            // Enable Roll button ONLY for the active player on their turn
+            document.getElementById('roll-btn').disabled = !(isMyTurn && dice === 0 && winner === -1);
+
+            // Render tokens only for active seats
             document.querySelectorAll('.token').forEach(el => el.remove());
 
             for (let p = 0; p < 4; p++) {
-                const pTokens = lines[p + 1].split(' ').map(Number);
-                pTokens.forEach((pos, t) => {
+                if (activeSeats[p] === 0) continue;
+                tokens[p].forEach((pos, t) => {
                     const [r, c] = getCellCoords(p, t, pos);
                     const tokenEl = document.createElement('div');
                     tokenEl.className = `token t-${p}`;
 
-                    if (p === turn && dice !== 0 && winner === -1) {
+                    if (isMyTurn && p === turn && dice !== 0 && winner === -1) {
                         const canMove = (pos === -1 && dice === 6) || (pos >= 0 && pos + dice <= 56);
                         if (canMove) {
                             tokenEl.classList.add('movable');
@@ -187,8 +267,9 @@
                 });
             }
         }
-        setInterval(updateBoard, 1000);
+
+        setInterval(updateBoard, 800);
         updateBoard();
     </script>
 </body>
-</html>
+</html>   
