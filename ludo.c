@@ -4,6 +4,8 @@
 #include <time.h>
 
 int tokens[4][4];
+int active_seats[4] = {1, 1, 1, 1};
+int num_players = 4;
 int turn = 0;
 int dice = 0;
 int six_count = 0;
@@ -27,7 +29,8 @@ int is_safe(int global_pos) {
 void save_state(const char *msg) {
     FILE *f = fopen("state.txt", "w");
     if (!f) return;
-    fprintf(f, "%d %d %d %d\n", turn, dice, six_count, winner);
+    fprintf(f, "%d %d %d %d %d\n", turn, dice, six_count, winner, num_players);
+    fprintf(f, "%d %d %d %d\n", active_seats[0], active_seats[1], active_seats[2], active_seats[3]);
     for (int p = 0; p < 4; p++) {
         fprintf(f, "%d %d %d %d\n", tokens[p][0], tokens[p][1], tokens[p][2], tokens[p][3]);
     }
@@ -38,14 +41,30 @@ void save_state(const char *msg) {
 void load_state() {
     FILE *f = fopen("state.txt", "r");
     if (!f) return;
-    fscanf(f, "%d %d %d %d", &turn, &dice, &six_count, &winner);
+    fscanf(f, "%d %d %d %d %d", &turn, &dice, &six_count, &winner, &num_players);
+    fscanf(f, "%d %d %d %d", &active_seats[0], &active_seats[1], &active_seats[2], &active_seats[3]);
     for (int p = 0; p < 4; p++) {
         fscanf(f, "%d %d %d %d", &tokens[p][0], &tokens[p][1], &tokens[p][2], &tokens[p][3]);
     }
     fclose(f);
 }
 
-void reset_game() {
+void reset_game(int count) {
+    if (count < 2 || count > 4) count = 4;
+    num_players = count;
+
+    // 2 players sit diagonally opposite (Red & Yellow)
+    if (count == 2) {
+        active_seats[0] = 1; active_seats[1] = 0;
+        active_seats[2] = 1; active_seats[3] = 0;
+    } else if (count == 3) {
+        active_seats[0] = 1; active_seats[1] = 1;
+        active_seats[2] = 1; active_seats[3] = 0;
+    } else {
+        active_seats[0] = 1; active_seats[1] = 1;
+        active_seats[2] = 1; active_seats[3] = 1;
+    }
+
     for (int p = 0; p < 4; p++) {
         for (int t = 0; t < 4; t++) {
             tokens[p][t] = -1;
@@ -55,10 +74,14 @@ void reset_game() {
     dice = 0;
     six_count = 0;
     winner = -1;
-    save_state("New Game Started! Red's turn to roll.");
+
+    char msg[150];
+    sprintf(msg, "New %d-Player Game Started! Red's turn to roll.", num_players);
+    save_state(msg);
 }
 
 int can_token_move(int p, int t, int d) {
+    if (!active_seats[p]) return 0;
     int pos = tokens[p][t];
     if (pos == -1) return (d == 6);
     if (pos + d <= 56) return 1;
@@ -68,7 +91,10 @@ int can_token_move(int p, int t, int d) {
 void next_turn(const char *prefix_msg) {
     char *names[] = {"Red", "Green", "Yellow", "Blue"};
     char full_msg[150];
-    turn = (turn + 1) % 4;
+    do {
+        turn = (turn + 1) % 4;
+    } while (!active_seats[turn]);
+
     dice = 0;
     six_count = 0;
     sprintf(full_msg, "%s %s's turn to roll.", prefix_msg, names[turn]);
@@ -126,10 +152,10 @@ void move_token(int t) {
 
     int new_pos = tokens[turn][t];
     int global_pos = get_global_pos(turn, new_pos);
-    
+
     if (global_pos != -1 && !is_safe(global_pos)) {
         for (int opp = 0; opp < 4; opp++) {
-            if (opp == turn) continue;
+            if (opp == turn || !active_seats[opp]) continue;
             for (int ot = 0; ot < 4; ot++) {
                 int opp_global = get_global_pos(opp, tokens[opp][ot]);
                 if (opp_global == global_pos) {
@@ -170,9 +196,12 @@ void move_token(int t) {
 }
 
 int main(int argc, char *argv[]) {
-    srand(time(NULL));
+    srand(time(NULL) ^ clock());
     if (argc < 2) return 0;
-    if (argv[1][0] == 'r') reset_game();
+    if (argv[1][0] == 'r') {
+        int count = (argc >= 3) ? atoi(argv[2]) : 4;
+        reset_game(count);
+    }
     else if (argv[1][0] == 'd') roll_dice();
     else if (argv[1][0] == 'm' && argc >= 3) move_token(atoi(argv[2]));
     return 0;
